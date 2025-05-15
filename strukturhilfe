@@ -1,0 +1,26 @@
+src/
+├── ui/
+│   ├── __init__.py
+│   ├── main_window.py          # QMainWindow, setup_ui_layout, Signal-Slots
+│   └── widgets/                # Für StackItemWidget und andere Custom UI-Elemente
+│       ├── __init__.py
+│       └── stack_item_widget.py
+├── services/
+│   ├── __init__.py
+│   ├── epd_service.py          # EPD-Daten: DB-Queries (evtl. über db_access_layer), fetch_epd, Parser
+│   ├── llm_service.py          # LLM: Prompt-Generierung, API-Call, Antwort-Parsing
+│   └── ifc_service.py          # IFC: Laden, identstreetlayers-Logik (Stack-Finder), Strategie-Wechsel
+├── ifc_strategies/             # Umbenannt von ifc_filters für Klarheit
+│   ├── __init__.py
+│   ├── base_strategy.py        # Abstrakte Basisklasse für eine IFC-Erkennungsstrategie
+│   ├── ident_layers_strategy.py # Konkrete Strategie basierend auf identstreetlayers
+│   └── new_method_strategy.py  # Beispiel für eine zukünftige neue Strategie
+├── core/                       # Oder direkt unter src/, wenn utils und config nicht so groß werden
+│   ├── __init__.py
+│   ├── config_manager.py       # Laden und Speichern von Konfigurationen (API-Key, Pfade, TopN)
+│   └── db_setup.py             # (Dein db.py) Low-Level: SQLite Helfer, Tabellenerstellung
+├── utils/                      # Unter src/ oder src/core/
+│   ├── __init__.py
+│   ├── constants.py            # POSSIBLE_LABELS, RELEVANT_COLUMNS etc.
+│   └── helpers.py              # Wirklich allgemeine Hilfsfunktionen
+└── main.py                     # Startpunkt der Anwendung (ersetzt if __name__ == "__main__")
