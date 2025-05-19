@@ -1,11 +1,12 @@
 # src/ui/widgets/epd_matcher_tab.py
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QGroupBox, QScrollArea,
                              QCheckBox, QPushButton, QRadioButton, QButtonGroup,
-                             QTextEdit,  # QTextEdit für die manuelle Eingabe
+                             QTextEdit, QHBoxLayout, QApplication,  # QTextEdit für die manuelle Eingabe
                              QMessageBox, QProgressDialog, QTabWidget, QLabel)  # QTabWidget für Layer-Tabs, QLabel
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 from src.services.fuzzy_service import fuzzy_search  # Importiere die Funktion direkt
-
+import json
+from src.utils.constants import DB_FILE, LABELS_COLUMN_NAME
 
 class EpdMatcherTab(QWidget):
     match_selected = pyqtSignal(str)  # Signal, das die UUID des ausgewählten EPDs sendet
@@ -346,47 +347,67 @@ Bitte gib deine Antwort ausschließlich als JSON-Objekt zurück, das dem im Syst
         self.clear_match_radio_buttons()
 
         if not results:
-            self.match_area_layout.addWidget(QLabel("Keine Ergebnisse gefunden."))
+            # Erstelle ein QLabel, wenn keine Ergebnisse gefunden wurden.
+            # Stelle sicher, dass QLabel importiert ist.
+            no_results_label = QLabel("Keine Ergebnisse gefunden.")
+            no_results_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Zentriere den Text
+            self.match_area_layout.addWidget(no_results_label)
             return
 
         for i, item in enumerate(results):
             uuid = item.get('uuid')
             name = item.get('name', 'N/A')
 
-            if not uuid:  # Sicherheitshalber überspringen, falls ein Ergebnis keine UUID hat
+            if not uuid:
                 print(f"WARNUNG: Ergebnis ohne UUID übersprungen: {item}")
                 continue
 
-            # Hole Zusatzinfos wie Ref-Jahr, Gültigkeit, Owner aus der DB für die Anzeige
-            # Dies könnte man optimieren, indem man diese Infos schon vorher holt oder EPDService eine Methode dafür hat
-            display_text = f"{i + 1}. {name} ({uuid[:8]}…)"
-            try:
-                # epd_service.get_epd_summary(uuid) wäre ideal
-                # Temporär: Direkter DB-Zugriff (sollte aber im EPDService sein)
-                conn = self.epd_service.get_connection()  # Annahme: EPDService hat get_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT ref_year, valid_until, owner FROM epds WHERE uuid = ?", (uuid,))
-                row = cursor.fetchone()
-                conn.close()
-                if row:
-                    ref_year, valid_until, owner = row['ref_year'], row['valid_until'], row['owner']
-                    display_text = f"{i + 1}. {name} ({uuid[:8]}… | Ref: {ref_year or 'N/A'} | Bis: {valid_until or 'N/A'} | Owner: {owner or 'N/A'})"
-            except Exception as db_err:
-                print(f"Fehler beim Holen von Zusatzinfos für {uuid}: {db_err}")
-                # display_text bleibt ohne Zusatzinfos
+            # Versuche, ref_year, valid_until, owner direkt aus dem 'item' zu bekommen.
+            # Dies setzt voraus, dass fetch_by_labels (für Fuzzy) oder die LLM-Datenaufbereitung (für LLM)
+            # diese Felder bereits im 'item' bereitstellt.
+            ref_year = item.get('ref_year', 'N/A')
+            valid_until = item.get('valid_until', 'N/A')  # Korrekter .get() Aufruf
+            owner = item.get('owner', 'N/A')
+
+            # Fallback: Wenn die Infos nicht im 'item' sind, versuche sie über den EPDService zu holen.
+            # Dies sollte nur geschehen, wenn die initiale Datenladung diese Infos nicht enthielt.
+            # Ideal wäre es, wenn 'results' bereits alle benötigten Infos enthält.
+            # Temporär lassen wir eine Abfrage über epd_service.get_details zu, aber es ist nicht optimal für die Performance hier.
+            # Besser: Stelle sicher, dass fetch_by_labels in EPDService diese Spalten immer mitlädt,
+            # wenn sie für die Anzeige benötigt werden.
+            # if ref_year == 'N/A' or valid_until == 'N/A' or owner == 'N/A': # Nur wenn Infos fehlen
+            #     try:
+            #         # get_details gibt ein dict zurück, nicht eine Connection
+            #         details_dict = self.epd_service.get_details(uuid) # Holt alle Details
+            #         if details_dict:
+            #             ref_year = details_dict.get('ref_year', ref_year) # Behalte alten Wert, falls nicht in Details
+            #             valid_until = details_dict.get('valid_until', valid_until)
+            #             owner = details_dict.get('owner', owner)
+            #     except Exception as db_err:
+            #         print(f"INFO: Konnte Zusatzinfos für {uuid} nicht via get_details laden: {db_err}")
+            #         # Die 'N/A'-Werte von oben bleiben dann bestehen.
+
+            display_text_parts = [
+                f"{i + 1}. {name} ({uuid[:8]}…)",
+                f"Ref: {ref_year}",
+                f"Bis: {valid_until}",
+                f"Owner: {owner}"
+            ]
+            display_text = " | ".join(display_text_parts)
 
             if is_llm:
                 reason = item.get('begruendung', 'Keine Begründung vom LLM.')
                 display_text += f"\n   LLM-Begründung: {reason}"
 
             rb = QRadioButton(display_text)
-            rb.setProperty("match_uuid", uuid)  # Speichere die volle UUID
+            rb.setProperty("match_uuid", uuid)
             self.radio_group.addButton(rb)
             self.match_area_layout.addWidget(rb)
             self.radio_buttons.append(rb)
 
         if self.radio_buttons:
             self.confirm_btn.setEnabled(True)
+
 
     def on_confirm_selection(self):
         """Wird aufgerufen, wenn der "Details abrufen"-Button geklickt wird."""

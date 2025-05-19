@@ -2,9 +2,8 @@
 import os  # Für os.path.basename
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QTextEdit,
                              QListWidget, QListWidgetItem, QProgressDialog,
-                             QMessageBox, QHBoxLayout, QLabel)  # QMessageBox, QHBoxLayout, QLabel hinzugefügt
+                             QMessageBox, QHBoxLayout, QLabel, QFileDialog, QApplication)  # QMessageBox, QHBoxLayout, QLabel hinzugefügt
 from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QFileDialog  # QFileDialog hier importieren
 
 # Importiere das neue StackItemWidget
 from .stack_item_widget import StackItemWidget
