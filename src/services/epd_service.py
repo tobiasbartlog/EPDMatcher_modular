@@ -36,6 +36,34 @@ class EPDService:
             cur.execute(f"SELECT {cols_sql} FROM epds WHERE {where}", params)
             return [dict(r) for r in cur.fetchall()]
 
+    def get_display_info_for_uuids(self, uuids: list[str]) -> dict[str, dict]:
+        """
+        Holt für eine Liste von UUIDs die Felder name, ref_year, valid_until, owner.
+        Gibt ein Dictionary zurück: {uuid: {name: ..., ref_year: ..., ...}}
+        """
+        if not uuids:
+            return {}
+
+        # Erzeuge Platzhalter für die SQL IN-Klausel
+        placeholders = ', '.join('?' for _ in uuids)
+        query = f"""
+            SELECT uuid, name, ref_year, valid_until, owner
+            FROM epds
+            WHERE uuid IN ({placeholders})
+        """
+        results_dict = {}
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, uuids)
+            for row in cur.fetchall():
+                results_dict[row['uuid']] = {
+                    'name': row['name'],  # Name auch hier holen für Konsistenz
+                    'ref_year': row['ref_year'],
+                    'valid_until': row['valid_until'],
+                    'owner': row['owner']
+                }
+        return results_dict
+
     def get_details(self, uuid: str) -> Dict[str, Any]:
         """
         Lädt ein EPD komplett plus evtl. zugehörige Umwelt-JSON.
