@@ -1,11 +1,15 @@
+# src/core/config_manager.py
 from pathlib import Path
 from configparser import ConfigParser
 from src.utils.constants import (
-    CONFIG_PATH,
+    CONFIG_PATH, # Stellt sicher, dass CONFIG_PATH aus constants.py korrekt ist (z.B. HOME / "EPDMatcher_modular" / "config.ini")
     DEFAULT_TOP_N,
     DEFAULT_IFC_MIN_PROXY_THICKNESS,
     DEFAULT_IFC_XY_TOLERANCE,
-    DEFAULT_IFC_MIN_ELEMENTS_IN_STACK)
+    DEFAULT_IFC_MIN_ELEMENTS_IN_STACK
+)
+
+DEFAULT_OPENAI_MODEL = "gpt-3.5-turbo" # Standardmodell
 
 class ConfigManager:
     def __init__(self):
@@ -13,6 +17,7 @@ class ConfigManager:
         self.cfg = ConfigParser()
         self.defaults = {
             ("openai", "api_key"): "",
+            ("openai", "model"): DEFAULT_OPENAI_MODEL, # Hinzugefügt
             ("openai", "top_n_for_llm"): str(DEFAULT_TOP_N),
             ("ifc_settings", "min_proxy_thickness"): str(DEFAULT_IFC_MIN_PROXY_THICKNESS),
             ("ifc_settings", "xy_tolerance"): str(DEFAULT_IFC_XY_TOLERANCE),
@@ -46,8 +51,22 @@ class ConfigManager:
         self.save()
 
     @property
+    def model(self) -> str: # Hinzugefügt
+        return self.cfg.get("openai", "model", fallback=self.defaults[("openai","model")])
+
+    @model.setter # Hinzugefügt
+    def model(self, model_name: str):
+        self.cfg.set("openai", "model", model_name)
+        self.save()
+
+    @property
     def top_n(self) -> int:
-        return self.cfg.getint("openai", "top_n_for_llm", fallback=int(self.defaults[("openai","top_n_for_llm")]))
+        try:
+            return self.cfg.getint("openai", "top_n_for_llm")
+        except ValueError:
+            return int(self.defaults[("openai","top_n_for_llm")])
+
+
     @top_n.setter
     def top_n(self, n: int):
         self.cfg.set("openai", "top_n_for_llm", str(n))
@@ -55,8 +74,12 @@ class ConfigManager:
 
     @property
     def ifc_min_proxy_thickness(self) -> float:
-        return self.cfg.getfloat("ifc_settings", "min_proxy_thickness",
-                                 fallback=float(self.defaults[("ifc_settings","min_proxy_thickness")]))
+        try:
+            return self.cfg.getfloat("ifc_settings", "min_proxy_thickness")
+        except ValueError:
+            return float(self.defaults[("ifc_settings","min_proxy_thickness")])
+
+
     @ifc_min_proxy_thickness.setter
     def ifc_min_proxy_thickness(self, v: float):
         self.cfg.set("ifc_settings", "min_proxy_thickness", str(v))
@@ -64,8 +87,11 @@ class ConfigManager:
 
     @property
     def ifc_xy_tolerance(self) -> float:
-        return self.cfg.getfloat("ifc_settings", "xy_tolerance",
-                                 fallback=float(self.defaults[("ifc_settings","xy_tolerance")]))
+        try:
+            return self.cfg.getfloat("ifc_settings", "xy_tolerance")
+        except ValueError:
+            return float(self.defaults[("ifc_settings","xy_tolerance")])
+
     @ifc_xy_tolerance.setter
     def ifc_xy_tolerance(self, v: float):
         self.cfg.set("ifc_settings", "xy_tolerance", str(v))
@@ -73,8 +99,11 @@ class ConfigManager:
 
     @property
     def ifc_min_elements_in_stack(self) -> int:
-        return self.cfg.getint("ifc_settings", "min_elements_in_stack",
-                               fallback=int(self.defaults[("ifc_settings","min_elements_in_stack")]))
+        try:
+            return self.cfg.getint("ifc_settings", "min_elements_in_stack")
+        except ValueError:
+            return int(self.defaults[("ifc_settings","min_elements_in_stack")])
+
     @ifc_min_elements_in_stack.setter
     def ifc_min_elements_in_stack(self, v: int):
         self.cfg.set("ifc_settings", "min_elements_in_stack", str(v))
