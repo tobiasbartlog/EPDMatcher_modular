@@ -1,61 +1,118 @@
 # src/main.py
 import sys
 import os
-from PyQt6.QtWidgets import QApplication, QMessageBox # Evtl. weitere Qt-Imports für den Start
+from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QMessageBox
 from PyQt6.QtGui import QIcon
-from utils.constants import DB_FILE #usw. Konstanten hier einfügen
 
-# --- WICHTIG: Passe diesen Import an, sobald EPDMatcherApp verschoben ist ---
-# Momentan wird es noch nicht funktionieren, da EPDMatcherApp noch nicht in ui.main_window ist
-# from ui.main_window import EPDMatcherApp
+# Core / Config
+from src.core.config_manager import ConfigManager
+from src.core.db_setup import init_db, get_connection
 
-# Dein base_path (wird evtl. angepasst, je nachdem wo main.py und assets liegen)
-if getattr(sys, 'frozen', False):
-    # base_path für PyInstaller, falls du es später nutzt
-    application_path = os.path.dirname(sys.executable)
-    base_path = sys._MEIPASS # für Assets im Bundle
-else:
-    application_path = os.path.dirname(os.path.abspath(__file__))
-    # base_path zeigt jetzt auf das src-Verzeichnis
-    # Wenn deine Assets einen Ordner höher liegen (im Projektroot), dann:
-    # project_root_path = os.path.dirname(application_path)
-    # oder wenn assets in src/assets liegen:
-    # base_path = application_path
-    base_path = os.path.dirname(os.path.abspath(__file__)) # Fürs Erste, anpassen für Assets
-    print("BP:", base_path)
+# Services
+from src.services.epd_service import EPDService
+from src.services.llm_service import LLMService
+from src.services.fuzzy_service import fuzzy_search
+from src.services.ifc_service import IFCService
 
-# --- Modulverfügbarkeit (Beispiel, muss ggf. später angepasst werden) ---
-fetch_epd_available = True
-try:
-    from src.services import fetch_epd # Dieser Import wird sich ändern, wenn fetch_epd in services landet
-except ImportError:
-    fetch_epd_available = False
+# UI-Tabs
+from src.ui.widgets.epd_matcher_tab import EpdMatcherTab
+from src.ui.widgets.ifc_analysis_tab import IfcAnalysisTab
+from src.ui.widgets.results_tab import ResultsTab
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, base_path: str):
+        super().__init__()
+        self.base_path = base_path
+        self.setWindowTitle("EPD Matcher")
+        self.setMinimumSize(1000, 700)
+
+        # Icon laden
+        icon_path = os.path.join(base_path, "assets", "icon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
+        # Datenbank initialisieren (erstes Mal)
+        db_file = os.path.join(base_path, "assets", "oekobaudat_epds.db")
+        init_db(db_file)
+
+        # Config & Services
+        cfg = ConfigManager()
+        llm = LLMService(api_key=cfg.api_key)
+        ifc = IFCService()  # implementiere select_ifc_file + analyse(...)
+        # epd_service kann man als Objekt oder als Modul-Funktionssatz anbieten
+        # wir packen beide fetch und details in ein kleines Objekt:
+        class EpdSrv:
+            @staticmethod
+            def fetch_epds_by_labels(labels, cols):
+                return fetch_epds_by_labels(labels, cols)
+            @staticmethod
+            def get_available_labels():
+                # aus Konstanten oder DB ermitteln
+                return cfg.possible_labels
+            @staticmethod
+            def get_relevant_columns():
+                return cfg.relevant_columns
+            @staticmethod
+            def get_epd_details(uuid):
+                return get_epd_details(uuid)
+
+        epd_srv = EpdSrv()
+
+        # Central TabWidget
+        self.tabs = QTabWidget(self)
+        self.setCentralWidget(self.tabs)
+
+        # 1) EPD-Matcher
+        self.matcher_tab = EpdMatcherTab(
+            epd_service=epd_srv,
+            llm_service=llm,
+            fuzzy_search=fuzzy_search
+        )
+        self.tabs.addTab(self.matcher_tab, "EPD Matching")
+
+        # 2) IFC-Analyse
+        self.ifc_tab = IfcAnalysisTab(ifc_service=ifc)
+        self.tabs.addTab(self.ifc_tab, "IFC Analyse")
+
+        # 3) Details/Ergebnisse
+        self.results_tab = ResultsTab(epd_service=epd_srv)
+        self.tabs.addTab(self.results_tab, "Details")
+
+        # Signal-Verknüpfungen
+        # Wenn im Matcher Tab eine EPD ausgewählt wurde, zeige Details:
+        self.matcher_tab.match_selected.connect(self.on_match_selected)
+        # Wenn die IFC-Analyse neue Stacks liefert, kann der Matcher sie nutzen:
+        self.ifc_tab.stacks_ready.connect(self.on_ifc_stacks_ready)
+
+    def on_match_selected(self, uuid: str):
+        """ Slot, wenn EPD aus Matcher ausgewählt wird """
+        # Tab auf Details umschalten und Daten füllen
+        self.tabs.setCurrentWidget(self.results_tab)
+        self.results_tab.on_match_selected(uuid)
+
+    def on_ifc_stacks_ready(self, stacks: list):
+        """ Slot, wenn IFC-Analyse fertig ist. Hier könntest Du z.B.
+            automatisch in den Matcher-Reiter Tabs für jede Schicht erzeugen. """
+        # Beispiel: Umschalten zum Matcher-Tab
+        self.tabs.setCurrentWidget(self.matcher_tab)
+        # Und eine Hilfsmethode aufrufen, die die `matcher_tab` mit den Stacks versorgt:
+        try:
+            self.matcher_tab.populate_from_ifc(stacks)
+        except AttributeError:
+            # falls noch nicht implementiert – nur exemplarisch
+            pass
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setApplicationName("EPD Matcher")
 
-    # Pfad zum Icon anpassen, z.B. wenn es in src/assets/icon.ico liegt
-    icon_path = os.path.join(base_path, "assets", "icon.ico") # Annahme: assets-Ordner in src/
-    if not os.path.exists(icon_path): # Besserer Pfad, z.B. relativ zum Projekt-Root
-        icon_path_alt = os.path.join(os.path.dirname(base_path), "assets", "icon.ico") # Annahme: assets im Projekt-Root
-        if os.path.exists(icon_path_alt):
-            icon_path = icon_path_alt
-        else:
-            print(f"WARNUNG: Icon nicht gefunden unter {icon_path} oder {icon_path_alt}")
+    # Base-Path ermitteln (für assets, DB etc.)
+    if getattr(sys, "frozen", False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
 
-    if os.path.exists(icon_path):
-        app.setWindowIcon(QIcon(icon_path))
-
-    # Dies wird erst funktionieren, wenn EPDMatcherApp verschoben und importiert wurde
-    # window = EPDMatcherApp(base_path=base_path) # base_path übergeben ist eine gute Idee
-    # window.showMaximized()
-
-    # if not fetch_epd_available:
-    #     QMessageBox.critical(None, "Import Fehler",
-    #                          f"Das Modul 'src{os.sep}fetch_epd.py' fehlt oder konnte nicht geladen werden.\nDetails abrufen funktioniert nicht.")
-    # # window.show() # showMaximized reicht
-    # sys.exit(app.exec())
-    print("INFO: main.py gestartet. EPDMatcherApp muss noch eingebunden werden.")
-    print(f"INFO: base_path ist {base_path}")
-    print(f"INFO: icon_path ist {icon_path}")
+    window = MainWindow(base)
+    window.showMaximized()
+    sys.exit(app.exec())
