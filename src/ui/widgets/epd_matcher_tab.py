@@ -164,58 +164,71 @@ class EpdMatcherTab(QWidget):
         self.confirm_btn.setEnabled(False)
 
     def find_matches_controller(self):
-        """Diese Methode sammelt die Eingaben und startet die passende Suchfunktion."""
-        self.clear_match_radio_buttons()  # Alte Ergebnisse löschen
+        """
+        Sammelt Eingaben, filtert EPDs vor und startet entweder die LLM- oder Fuzzy-Suche.
+        Stellt sicher, dass die für die Anzeige benötigten Daten effizient geladen werden.
+        """
+        self.clear_match_radio_buttons()  # Alte Ergebnisse aus der UI entfernen
 
-        # Aktuellen Suchkontext und Eingabe ermitteln
+        # 1. Aktuellen Suchkontext und Benutzereingabe ermitteln
         current_search_tab_index = self.layer_epd_search_tabs.currentIndex()
         self.current_epd_search_context_title = self.layer_epd_search_tabs.tabText(current_search_tab_index)
 
         user_input_text = ""
-        if self.current_epd_search_context_title == "Manuelle Suche":
-            user_input_text = self.manual_input_box.toPlainText().strip()
-        else:
-            # Finde das Eingabefeld für den aktiven Layer-Tab
-            # Dies setzt voraus, dass handle_ifc_layers_for_search die Widgets korrekt speichert
-            for layer_widget_info in self.active_layer_search_widgets:
-                # Wir brauchen einen Weg, um das Widget im Tab zu identifizieren,
-                # z.B. indem wir das QTextEdit direkt im Layer-Info speichern.
-                # Nehmen wir an, layer_widget_info['input_widget'] ist das QTextEdit.
-                # und layer_widget_info['tab_title'] ist der Titel des Tabs.
-                if layer_widget_info.get('tab_title') == self.current_epd_search_context_title:
-                    input_widget = layer_widget_info.get('input_widget')
-                    if input_widget:
-                        user_input_text = input_widget.toPlainText().strip()
-                    break
+        active_tab_widget = self.layer_epd_search_tabs.widget(current_search_tab_index)
+
+        # Benutzereingabe aus dem aktiven Tab holen
+        if active_tab_widget:
+            # Versuche, das primäre QTextEdit-Widget im aktuellen Tab zu finden.
+            # Diese Logik ist abhängig davon, wie die Layer-Tabs in `handle_ifc_layers_for_search`
+            # und der manuelle Tab in `_build_ui` strukturiert sind.
+            # Am robustesten ist es, wenn `handle_ifc_layers_for_search` eine Referenz
+            # auf das Eingabefeld im `active_layer_search_widgets`-Eintrag speichert.
+            found_text_edit = None
+            if self.current_epd_search_context_title == "Manuelle Suche":
+                found_text_edit = self.manual_input_box
+            else:
+                for layer_info in self.active_layer_search_widgets:
+                    if layer_info.get('tab_title') == self.current_epd_search_context_title:
+                        found_text_edit = layer_info.get('input_widget')
+                        break
+
+            if found_text_edit:
+                user_input_text = found_text_edit.toPlainText().strip()
 
         if not user_input_text:
             QMessageBox.warning(self, "Eingabe fehlt",
                                 f"Bitte eine Beschreibung im Tab '{self.current_epd_search_context_title}' eingeben.")
             return
 
+        # 2. Filterparameter sammeln
         selected_labels = [lbl for lbl, cb in self.label_checkbox_widgets.items() if cb.isChecked()]
         if not selected_labels:
             QMessageBox.warning(self, "Label fehlt", "Bitte mindestens ein Anwendungs-Label auswählen.")
             return
 
-        # Spalten nur für LLM relevant
-        selected_columns = []
-        if self.rb_api.isChecked():
-            selected_columns = [col for col, cb in self.column_checkbox_widgets.items() if cb.isChecked()]
-            if not selected_columns:
-                QMessageBox.warning(self, "Spalten fehlen",
-                                    "Für das API Matching (LLM) bitte mindestens eine Spalte für den Kontext auswählen.")
-                return
+        # Kontextspalten, die vom Benutzer für das LLM ausgewählt wurden
+        selected_columns_for_llm_context = [col for col, cb in self.column_checkbox_widgets.items() if cb.isChecked()]
+        if self.rb_api.isChecked() and not selected_columns_for_llm_context:
+            QMessageBox.warning(self, "Spalten fehlen",
+                                "Für das API Matching (LLM) bitte mindestens eine Spalte für den Kontext auswählen.")
+            return
 
-        # EPDs basierend auf Labels vorfiltern
+        # 3. Spalten für den Datenbank-Fetch definieren
+        # Diese Spalten werden *immer* für die Anzeige der RadioButtons benötigt.
+        display_columns_needed = ['uuid', 'name', 'ref_year', 'valid_until', 'owner']
+
+        # Die Spalten, die initial aus der Datenbank geholt werden:
+        # Enthalten immer die Display-Spalten und, falls LLM aktiv ist, auch die LLM-Kontextspalten.
+        cols_for_initial_db_fetch = list(set(display_columns_needed + selected_columns_for_llm_context))
+
+        # 4. EPDs aus der Datenbank vorfiltern
         try:
-            # Die EPDService.fetch_by_labels erwartet nur Label-Namen und Spalten für den SELECT
-            # Die Spalten hier sind die, die für den LLM-Kontext relevant sind, plus 'uuid' und 'name'.
-            # fetch_by_labels sollte immer uuid und name zurückgeben, plus die explizit angeforderten 'selected_columns'.
-            cols_for_fetch = list(set(['uuid', 'name'] + selected_columns))
-            pre_filtered_epds = self.epd_service.fetch_by_labels(selected_labels, cols_for_fetch)
+            # `Workspace_by_labels` holt jetzt alle `cols_for_initial_db_fetch`
+            pre_filtered_epds = self.epd_service.fetch_by_labels(selected_labels, cols_for_initial_db_fetch)
         except Exception as e:
             QMessageBox.critical(self, "Datenbankfehler", f"Fehler beim Abrufen der EPDs: {e}")
+            # import traceback; traceback.print_exc() # Für detailliertes Debugging
             return
 
         if not pre_filtered_epds:
@@ -223,26 +236,44 @@ class EpdMatcherTab(QWidget):
                                     "Keine EPDs für die ausgewählten Label-Filter in der Datenbank gefunden.")
             return
 
-        # Ladeanzeige starten
-        if self.loading_dialog:
+        # 5. Ladeanzeige vorbereiten und anzeigen
+        if self.loading_dialog:  # Alten Dialog schließen, falls vorhanden
             self.loading_dialog.close()
+            self.loading_dialog = None
+
+        search_type_text = 'LLM' if self.rb_api.isChecked() else 'Fuzzy'
         self.loading_dialog = QProgressDialog(
-            f"Suche EPDs für '{user_input_text[:30]}...' ({'LLM' if self.rb_api.isChecked() else 'Fuzzy'})...", None, 0,
-            0, self)
+            f"Suche EPDs für '{user_input_text[:30]}...' ({search_type_text})...",
+            None, 0, 0, self
+        )
         self.loading_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.loading_dialog.setCancelButton(None)
-        self.loading_dialog.setMinimumDuration(0)
+        self.loading_dialog.setMinimumDuration(0)  # Sofort anzeigen
         self.loading_dialog.show()
-        QApplication.processEvents()  # Wichtig, damit der Dialog gezeichnet wird
+        QApplication.processEvents()  # Stellen sicher, dass der Dialog gezeichnet wird
 
+        # 6. Entsprechende Suchfunktion mit Verzögerung starten
         if self.rb_api.isChecked():
-            # Starte LLM-Suche mit Verzögerung, damit der Lade-Dialog erscheint
-            QTimer.singleShot(50,
-                              lambda: self._execute_llm_search(user_input_text, pre_filtered_epds, selected_columns))
+            # `pre_filtered_epds` enthält bereits alle Infos (Display + LLM-Kontext)
+            # `selected_columns_for_llm_context` wird für den Prompt-Bau verwendet
+            QTimer.singleShot(50, lambda: self._execute_llm_search(
+                user_input_text,
+                pre_filtered_epds,
+                selected_columns_for_llm_context
+            ))
         else:  # Fuzzy Search
-            # Starte Fuzzy-Suche mit Verzögerung
-            QTimer.singleShot(50,
-                              lambda: self._execute_fuzzy_search(user_input_text, pre_filtered_epds, selected_columns))
+            # `pre_filtered_epds` enthält bereits alle Display-Infos.
+            # Für den Fuzzy-Suchtext (die `columns` in `fuzzy_search`)
+            # verwenden wir 'name' und die vom User gewählten LLM-Kontextspalten
+            # (als Proxy für "vom User gewählte Textspalten für die Suche").
+            # Man könnte auch eine separate Checkbox-Gruppe für Fuzzy-Kontextspalten haben.
+            fuzzy_search_text_columns = list(set(['name'] + selected_columns_for_llm_context))
+            QTimer.singleShot(50, lambda: self._execute_fuzzy_search(
+                user_input_text,
+                pre_filtered_epds,  # Enthält bereits alle Display-Infos
+                fuzzy_search_text_columns  # Spalten für den Bau des Fuzzy-Suchtextes
+            ))
+
 
     def _execute_llm_search(self, user_input, epds_for_context, context_columns):
         """Führt die LLM-basierte Suche aus."""
@@ -290,12 +321,6 @@ class EpdMatcherTab(QWidget):
 
         epd_context_str = "\n - ".join(lines) if lines else "Keine EPDs im direkten Kontext (Filter prüfen)."
 
-        # Der System Prompt ist jetzt im LLMService, wir bauen nur den User-Teil
-        # System Prompt aus LLMService:
-        # "You are an assistant helping to match user requests to EPDs. "
-        # "Respond ONLY with a valid JSON object. The object must contain "
-        # "a key 'matches' which is a list of up to 3 match objects, each "
-        # "with 'uuid', 'name' and 'begruendung'."
 
         prompt = f"""
 Basierend auf der Benutzeranfrage und der folgenden Liste von EPDs (mit ihren jeweiligen UUIDs, Namen und relevanten Daten), identifiziere bitte bis zu 3 der passendsten EPDs.

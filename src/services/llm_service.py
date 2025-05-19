@@ -54,19 +54,46 @@ class LLMService:
             # choices[0] sollte immer da sein
             return resp.choices[0].message.content.strip()
 
-        except openai.error.AuthenticationError:
-            return json.dumps({"error": "Auth fehlgeschlagen. API Key prüfen!"})
-        except openai.error.RateLimitError:
-            return json.dumps({"error": "Rate Limit erreicht."})
-        except openai.error.BadRequestError as e:
-            detail = getattr(e, "body", str(e))
-            return json.dumps({"error": f"Bad Request: {detail}"})
-        except openai.error.APIConnectionError as e:
-            return json.dumps({"error": f"Verbindung fehlgeschlagen: {e}"})
-        except openai.error.APITimeoutError:
-            return json.dumps({"error": "API Timeout."})
-        except Exception as e:
-            return json.dumps({"error": f"Unerwarteter Fehler: {e}"})
+
+        except openai.AuthenticationError:  # Direkt die importierte Klasse verwenden
+
+            return json.dumps({"error": "OpenAI Authentifizierung fehlgeschlagen. API Key prüfen!"})
+
+        except openai.RateLimitError:  # Direkt die importierte Klasse verwenden
+
+            return json.dumps({"error": "OpenAI Rate Limit erreicht."})
+
+        except openai.BadRequestError as e:  # Direkt die importierte Klasse verwenden
+
+            # `e.body` könnte nützliche Details enthalten, falls vorhanden
+
+            detail = getattr(e, "body", {}).get("message", str(e)) if hasattr(e, "body") and isinstance(e.body,
+                                                                                                        dict) else str(
+                e)
+
+            return json.dumps({"error": f"OpenAI Bad Request: {detail}"})
+
+        except openai.APIConnectionError as e:  # Direkt die importierte Klasse verwenden
+
+            return json.dumps({"error": f"Verbindung zur OpenAI API fehlgeschlagen: {e}"})
+
+        except openai.APITimeoutError:  # Direkt die importierte Klasse verwenden
+
+            return json.dumps({"error": "OpenAI API Anfrage Timeout."})
+
+        except openai.APIError as e:  # Oberklasse für andere API-Fehler
+
+            return json.dumps({"error": f"Allgemeiner OpenAI API Fehler: {e}"})
+
+        except Exception as e:  # Für alle anderen, unerwarteten Fehler
+
+            # Optional: Hier den vollen Traceback loggen für Debugging-Zwecke
+
+            # import traceback
+
+            # traceback.print_exc()
+
+            return json.dumps({"error": f"Unerwarteter Fehler bei der LLM-Kommunikation: {type(e).__name__} - {e}"})
 
     def parse_matches(self, llm_raw: str) -> List[Dict[str, Any]]:
         """
