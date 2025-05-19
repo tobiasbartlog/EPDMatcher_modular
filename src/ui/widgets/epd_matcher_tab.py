@@ -400,16 +400,16 @@ Bitte gib deine Antwort ausschließlich als JSON-Objekt zurück, das dem im Syst
             # Temporär lassen wir eine Abfrage über epd_service.get_details zu, aber es ist nicht optimal für die Performance hier.
             # Besser: Stelle sicher, dass fetch_by_labels in EPDService diese Spalten immer mitlädt,
             # wenn sie für die Anzeige benötigt werden.
-            # if ref_year == 'N/A' or valid_until == 'N/A' or owner == 'N/A': # Nur wenn Infos fehlen
-            #     try:
-            #         # get_details gibt ein dict zurück, nicht eine Connection
-            #         details_dict = self.epd_service.get_details(uuid) # Holt alle Details
-            #         if details_dict:
-            #             ref_year = details_dict.get('ref_year', ref_year) # Behalte alten Wert, falls nicht in Details
-            #             valid_until = details_dict.get('valid_until', valid_until)
-            #             owner = details_dict.get('owner', owner)
-            #     except Exception as db_err:
-            #         print(f"INFO: Konnte Zusatzinfos für {uuid} nicht via get_details laden: {db_err}")
+            if ref_year == 'N/A' or valid_until == 'N/A' or owner == 'N/A': # Nur wenn Infos fehlen
+                try:
+                    # get_details gibt ein dict zurück, nicht eine Connection
+                    details_dict = self.epd_service.get_details(uuid) # Holt alle Details
+                    if details_dict:
+                        ref_year = details_dict.get('ref_year', ref_year) # Behalte alten Wert, falls nicht in Details
+                        valid_until = details_dict.get('valid_until', valid_until)
+                        owner = details_dict.get('owner', owner)
+                except Exception as db_err:
+                    print(f"INFO: Konnte Zusatzinfos für {uuid} nicht via get_details laden: {db_err}")
             #         # Die 'N/A'-Werte von oben bleiben dann bestehen.
 
             display_text_parts = [
